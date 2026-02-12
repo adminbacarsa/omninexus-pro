@@ -1,0 +1,61 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "plazos_fijo",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "inversorId", "order": "ASCENDING" },
+        { "fieldPath": "fechaInicio", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "aportes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "inversorId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "movimientos_caja",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cajaId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "movimientos_fondo",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cuentaOrigenId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "movimientos_fondo",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cuentaDestinoId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "movimientos_fondo",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "inversorId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_log",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "collection", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
