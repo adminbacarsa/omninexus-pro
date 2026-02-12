@@ -55,6 +55,13 @@
         { "fieldPath": "collection", "order": "ASCENDING" },
         { "fieldPath": "timestamp", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "fechas_pago",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fechaProgramada", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -290,9 +290,16 @@ export async function listMovimientosPlazoFijo(pfId: string): Promise<Movimiento
 
 export async function listFechasPago(pfId: string): Promise<FechaPagoPF[]> {
   const ref = collection(db, COL, pfId, SUB_FECHAS);
-  const q = query(ref, orderBy('fechaProgramada', 'asc'));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FechaPagoPF));
+  try {
+    const q = query(ref, orderBy('fechaProgramada', 'asc'));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FechaPagoPF));
+  } catch {
+    const snap = await getDocs(ref);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as FechaPagoPF))
+      .sort((a, b) => (a.fechaProgramada || '').localeCompare(b.fechaProgramada || ''));
+  }
 }
 
 async function crearMovimientoInterno(

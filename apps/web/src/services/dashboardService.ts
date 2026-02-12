@@ -1,4 +1,4 @@
-import { listPlazosFijo, listFechasPago, listMovimientosPlazoFijo } from './plazoFijoService';
+import { listPlazosFijo, listFechasPago } from './plazoFijoService';
 import { listInversores } from './inversorService';
 import { listCuentasFondo, listMovimientosFondo } from './flujoFondosService';
 import { db } from '@/lib/firebase';
@@ -10,6 +10,8 @@ export interface DashboardKPIs {
   interesesAPagarHoyUSD: number;
   interesesAPagarMes: number;
   interesesAPagarMesUSD: number;
+  interesesPendientesTotalARS: number;
+  interesesPendientesTotalUSD: number;
   aportesMes: number;
   retirosMes: number;
   flujoNetoMes: number;
@@ -50,15 +52,13 @@ export async function getDashboardKPIs(): Promise<DashboardKPIs> {
   let inversores: Awaited<ReturnType<typeof listInversores>> = [];
   let cuentas: Awaited<ReturnType<typeof listCuentasFondo>> = [];
   let movimientosMes: Awaited<ReturnType<typeof listMovimientosFondo>> = [];
-  let movimientosTodos: Awaited<ReturnType<typeof listMovimientosFondo>> = [];
 
   try {
-    [plazos, inversores, cuentas, movimientosMes, movimientosTodos] = await Promise.all([
+    [plazos, inversores, cuentas, movimientosMes] = await Promise.all([
       listPlazosFijo(),
       listInversores(),
       listCuentasFondo(),
       listMovimientosFondo({ desde: inicioMes, hasta: finMes }),
-      listMovimientosFondo(), // Sin filtro de fecha: flujo completo para capital adeudado
     ]);
   } catch (e) {
     console.error('[Dashboard] Error cargando datos:', e);
@@ -75,85 +75,44 @@ export async function getDashboardKPIs(): Promise<DashboardKPIs> {
   }
 
   const plazosActivos = plazos.filter((p) => p.estado === 'activo');
+  const plazosConCapital = plazos.filter(
+    (p) => (p.estado === 'activo' || p.estado === 'vencido') && (p.capitalActual ?? p.capitalInicial ?? 0) > 0
+  );
 
-  // Capital adeudado = Lo prestado + Intereses capitalizados - Devoluciones de capital (fórmula por flujo)
-  let prestadoARS = 0;
-  let prestadoUSD = 0;
-  let interesesCapitalizadosARS = 0;
-  let interesesCapitalizadosUSD = 0;
-  let devolucionesARS = 0;
-  let devolucionesUSD = 0;
+  // Capital adeudado = saldos actuales (balance): cuentas de inversores + capital en plazos
+  // Evita doble conteo que ocurría con la fórmula por flujo
+  let capitalTotalAdeudadoARS = 0;
+  let capitalTotalAdeudadoUSD = 0;
 
-  // 1. Lo prestado: Aporte inversor (movimientos_fondo) + capital directo a PFs (capitalInicial + aportes que no vinieron de cuenta)
-  for (const m of movimientosTodos) {
-    const monto = m.monto ?? 0;
-    const moneda = m.moneda ?? 'ARS';
-    const isUSD = moneda === 'USD';
-    if (m.categoria === 'Aporte inversor' && m.cuentaDestinoId) {
-      if (isUSD) prestadoUSD += monto;
-      else prestadoARS += monto;
-    } else if (m.categoria === 'Retiro inversor' || m.categoria === 'Pago de capital a inversores') {
-      if (isUSD) devolucionesUSD += monto;
-      else devolucionesARS += monto;
-    }
+  for (const c of cuentas) {
+    if (c.activa === false || !c.inversorId) continue;
+    const saldo = c.saldoActual ?? c.saldoInicial ?? 0;
+    if (c.moneda === 'USD') capitalTotalAdeudadoUSD += saldo;
+    else capitalTotalAdeudadoARS += saldo;
   }
-
-  // 2. Movimientos en plazos fijo: aporte (+), capitalizacion_interes (+), retiro_capital (-)
-  let sumaCapitalInicialARS = 0;
-  let sumaCapitalInicialUSD = 0;
-  let sumaInversionPlazoFijoARS = 0;
-  let sumaInversionPlazoFijoUSD = 0;
-  for (const m of movimientosTodos) {
-    const monto = m.monto ?? 0;
-    const moneda = m.moneda ?? 'ARS';
-    const isUSD = moneda === 'USD';
-    if (m.categoria === 'Inversión plazo fijo' && m.cuentaOrigenId) {
-      if (isUSD) sumaInversionPlazoFijoUSD += monto;
-      else sumaInversionPlazoFijoARS += monto;
-    }
+  for (const pf of plazosConCapital) {
+    const cap = pf.capitalActual ?? pf.capitalInicial ?? 0;
+    if (pf.moneda === 'USD') capitalTotalAdeudadoUSD += cap;
+    else capitalTotalAdeudadoARS += cap;
   }
-  for (const pf of plazos) {
-    const moneda = pf.moneda ?? 'ARS';
-    const isUSD = moneda === 'USD';
-    const capInicial = pf.capitalInicial ?? 0;
-    if (isUSD) sumaCapitalInicialUSD += capInicial;
-    else sumaCapitalInicialARS += capInicial;
-
-    try {
-      const movs = await listMovimientosPlazoFijo(pf.id!);
-      for (const mov of movs) {
-        const mont = mov.monto ?? 0;
-        if (mov.tipo === 'aporte') {
-          aportePF += mont;
-        } else if (mov.tipo === 'capitalizacion_interes') {
-          capPF += mont;
-          if (isUSD) interesesCapitalizadosUSD += mont;
-          else interesesCapitalizadosARS += mont;
-        } else if (mov.tipo === 'retiro_capital') {
-          retiroPF += mont;
-          if (isUSD) devolucionesUSD += mont;
-          else devolucionesARS += mont;
-        }
-      }
-    } catch {}
-    prestadoARS += isUSD ? 0 : aportePF;
-    prestadoUSD += isUSD ? aportePF : 0;
-  }
-  // Capital inicial de PFs que no vino de cuenta (manual)
-  prestadoARS += Math.max(0, sumaCapitalInicialARS - sumaInversionPlazoFijoARS);
-  prestadoUSD += Math.max(0, sumaCapitalInicialUSD - sumaInversionPlazoFijoUSD);
-
-  let capitalTotalAdeudadoARS = prestadoARS + interesesCapitalizadosARS - devolucionesARS;
-  let capitalTotalAdeudadoUSD = prestadoUSD + interesesCapitalizadosUSD - devolucionesUSD;
+  // Negativo: pasivo/deuda con inversores
+  capitalTotalAdeudadoARS = -Math.abs(capitalTotalAdeudadoARS);
+  capitalTotalAdeudadoUSD = -Math.abs(capitalTotalAdeudadoUSD);
 
   let interesesAPagarHoyARS = 0;
   let interesesAPagarHoyUSD = 0;
   let interesesAPagarMes = 0;
   let interesesAPagarMesUSD = 0;
+  let interesesPendientesTotalARS = 0;
+  let interesesPendientesTotalUSD = 0;
   let aportesMes = 0;
   let retirosMes = 0;
   let plazosCapitalizan = 0;
   let plazosPagan = 0;
+
+  const plazosParaIntereses = plazos.filter(
+    (p) => (p.estado === 'activo' || p.estado === 'vencido') && (p.capitalActual ?? p.capitalInicial ?? 0) > 0
+  );
 
   for (const pf of plazosActivos) {
     if (pf.aplicacionIntereses === 'capitalizar') {
@@ -161,16 +120,18 @@ export async function getDashboardKPIs(): Promise<DashboardKPIs> {
     } else {
       plazosPagan += 1;
     }
+  }
 
+  for (const pf of plazosParaIntereses) {
     try {
-      const [fechas, movs] = await Promise.all([
-        listFechasPago(pf.id!),
-        listMovimientosPlazoFijo(pf.id!),
-      ]);
+      const fechas = await listFechasPago(pf.id!);
 
       for (const f of fechas) {
-        if (f.estado !== 'pendiente' && f.estado !== 'vencido') continue;
+        const est = f.estado ?? 'pendiente';
+        if (est !== 'pendiente' && est !== 'vencido') continue;
         const monto = f.interesEstimado ?? 0;
+        if (pf.moneda === 'USD') interesesPendientesTotalUSD += monto;
+        else interesesPendientesTotalARS += monto;
         if (f.fechaProgramada === HOY) {
           if (pf.moneda === 'USD') interesesAPagarHoyUSD += monto;
           else interesesAPagarHoyARS += monto;
@@ -200,14 +161,13 @@ export async function getDashboardKPIs(): Promise<DashboardKPIs> {
     }
   }
 
-  const capitalTotal = capitalTotalAdeudadoARS;
+  const capitalAbs = Math.abs(capitalTotalAdeudadoARS);
   const pctCapitalizacion =
     plazosActivos.length > 0 ? (plazosCapitalizan / plazosActivos.length) * 100 : 0;
   const pctPagar = plazosActivos.length > 0 ? (plazosPagan / plazosActivos.length) * 100 : 0;
   const flujoNetoMes = aportesMes - retirosMes;
-  const pctCrecimientoAportes =
-    capitalTotal > 0 ? (aportesMes / capitalTotal) * 100 : 0;
-  const pctBajaRetiros = capitalTotal > 0 ? (retirosMes / capitalTotal) * 100 : 0;
+  const pctCrecimientoAportes = capitalAbs > 0 ? (aportesMes / capitalAbs) * 100 : 0;
+  const pctBajaRetiros = capitalAbs > 0 ? (retirosMes / capitalAbs) * 100 : 0;
 
   return {
     capitalTotalAdeudadoARS,
@@ -216,6 +176,8 @@ export async function getDashboardKPIs(): Promise<DashboardKPIs> {
     interesesAPagarHoyUSD,
     interesesAPagarMes,
     interesesAPagarMesUSD,
+    interesesPendientesTotalARS,
+    interesesPendientesTotalUSD,
     aportesMes,
     retirosMes,
     flujoNetoMes,

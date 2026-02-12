@@ -69,7 +69,7 @@ export default function AdminDashboardPage() {
   }
 
   const capitalTotal = (kpis?.capitalTotalAdeudadoARS ?? 0) + (kpis?.capitalTotalAdeudadoUSD ?? 0);
-  const hayCapital = capitalTotal > 0;
+  const hayCapital = capitalTotal !== 0;
 
   return (
     <AdminLayout title="Dashboard">
@@ -202,7 +202,7 @@ export default function AdminDashboardPage() {
                 </div>
                 <div>
                   <p className="text-slate-500 text-sm font-medium">Capital total adeudado (ARS)</p>
-                  <p className="text-2xl font-bold text-slate-800">
+                  <p className={`text-2xl font-bold ${(kpis?.capitalTotalAdeudadoARS ?? 0) < 0 ? 'text-red-600' : 'text-slate-800'}`}>
                     {kpis ? formatMonto(kpis.capitalTotalAdeudadoARS, 'ARS') : '—'}
                   </p>
                 </div>
@@ -215,7 +215,7 @@ export default function AdminDashboardPage() {
                 </div>
                 <div>
                   <p className="text-slate-500 text-sm font-medium">Capital total adeudado (USD)</p>
-                  <p className="text-2xl font-bold text-slate-800">
+                  <p className={`text-2xl font-bold ${(kpis?.capitalTotalAdeudadoUSD ?? 0) < 0 ? 'text-red-600' : 'text-slate-800'}`}>
                     {kpis ? formatMonto(kpis.capitalTotalAdeudadoUSD, 'USD') : '—'}
                   </p>
                 </div>
@@ -253,7 +253,7 @@ export default function AdminDashboardPage() {
           </button>
           <div
             id="intereses-pagar-content"
-            className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 pt-0 transition-all duration-200 ${interesesExpanded ? 'block' : 'hidden'}`}
+            className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4 pt-0 transition-all duration-200 ${interesesExpanded ? 'block' : 'hidden'}`}
           >
             <div className="card-kpi-slate hover:shadow-lg">
               <div className="flex items-center gap-4">
@@ -303,6 +303,21 @@ export default function AdminDashboardPage() {
                   <p className="text-slate-500 text-sm font-medium">Intereses mes en curso (USD)</p>
                   <p className="text-2xl font-bold text-slate-800">
                     {kpis ? formatMonto(kpis.interesesAPagarMesUSD, 'USD') : '—'}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="card-kpi-slate hover:shadow-lg lg:col-span-2">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center">
+                  <Calendar className="w-6 h-6 text-amber-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-slate-500 text-sm font-medium">Intereses pendientes totales (ARS + USD)</p>
+                  <p className="text-2xl font-bold text-slate-800">
+                    {kpis
+                      ? `${formatMonto(kpis.interesesPendientesTotalARS ?? 0, 'ARS')} / ${formatMonto(kpis.interesesPendientesTotalUSD ?? 0, 'USD')}`
+                      : '—'}
                   </p>
                 </div>
               </div>
