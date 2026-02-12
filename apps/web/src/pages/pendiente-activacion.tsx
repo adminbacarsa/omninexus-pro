@@ -6,7 +6,7 @@ import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { usePermisos } from '@/context/PermisosContext';
-import { UserClock, LogOut } from 'lucide-react';
+import { Clock, LogOut } from 'lucide-react';
 
 export default function PendienteActivacionPage() {
   const router = useRouter();
@@ -41,7 +41,7 @@ export default function PendienteActivacionPage() {
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 text-center">
         <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-6">
-          <UserClock className="w-8 h-8 text-amber-600" />
+          <Clock className="w-8 h-8 text-amber-600" />
         </div>
         <h1 className="text-xl font-bold text-slate-800 mb-2">
           Cuenta pendiente de activación
