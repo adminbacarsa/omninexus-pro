@@ -47,7 +47,7 @@ export default function UsuariosPage() {
 
   const abrirEditar = (u: SystemUser) => {
     const efectivos = resolvePermisos(u);
-    setForm({ ...u, permisos: efectivos });
+    setForm({ ...u, permisos: efectivos, activo: u.activo !== false });
     setModal(u);
     listCajasChica().then(setCajasChica).catch(() => setCajasChica([]));
   };
@@ -67,6 +67,7 @@ export default function UsuariosPage() {
         permisos: form.permisos,
         email: form.email,
         displayName: form.displayName,
+        activo: form.activo,
       }, user?.uid);
       toast.success('Usuario actualizado');
       cerrarModal();
@@ -143,8 +144,8 @@ export default function UsuariosPage() {
     <AdminLayout title="Usuarios del sistema" backHref="/admin/dashboard" backLabel="Dashboard">
       <div className="max-w-4xl mx-auto space-y-6">
         <p className="text-slate-600 text-sm">
-          Asigná roles y permisos por módulo. Super Admin y Administrador tienen acceso total.
-          Administrativo puede tener permisos limitados (ej: ver inversores y caja chica, sin plazos fijo).
+          Los usuarios que inician sesión por primera vez aparecen como <strong>Pendiente</strong>. Activalos,
+          asigná rol y permisos para que puedan acceder. Super Admin y Administrador tienen acceso total.
         </p>
 
         {loading ? (
@@ -166,12 +167,23 @@ export default function UsuariosPage() {
                     className="p-4 flex flex-wrap items-center justify-between gap-4 hover:bg-slate-50"
                   >
                     <div>
-                      <div className="font-medium text-slate-800">{u.email}</div>
+                      <div className="font-medium text-slate-800 flex items-center gap-2">
+                        {u.email}
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            u.activo !== false
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {u.activo !== false ? 'Activo' : 'Pendiente'}
+                        </span>
+                        {u.uid === user?.uid && (
+                          <span className="text-blue-600 text-sm">(vos)</span>
+                        )}
+                      </div>
                       <div className="text-sm text-slate-500">
                         {u.displayName ?? '—'} · {ROL_LABELS[u.rol ?? 'administrador']}
-                        {u.uid === user?.uid && (
-                          <span className="ml-2 text-blue-600">(vos)</span>
-                        )}
                       </div>
                     </div>
                     {canEdit && (
@@ -203,6 +215,19 @@ export default function UsuariosPage() {
               </h2>
               <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
                 <div className="p-4 space-y-6 overflow-y-auto flex-1 min-h-0">
+                  <div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.activo !== false}
+                        onChange={(e) => setForm({ ...form, activo: e.target.checked })}
+                      />
+                      <span className="text-sm font-medium text-slate-700">Usuario activo (puede acceder a la plataforma)</span>
+                    </label>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Desactivá para bloquear el acceso sin eliminar el usuario.
+                    </p>
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Rol</label>
                     <select

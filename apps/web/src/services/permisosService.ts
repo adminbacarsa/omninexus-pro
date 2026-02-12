@@ -74,7 +74,7 @@ export async function createOrUpdateSystemUser(
 
   const users = await listSystemUsers();
   const isFirstUser = users.length === 0;
-  const activo = data.activo !== undefined ? data.activo : isFirstUser;
+  const activo = isFirstUser ? true : (data.activo !== undefined ? data.activo : false);
   const rol = isFirstUser ? 'super_admin' : (data.rol ?? 'custom');
 
   const ref = collection(db, COL);
