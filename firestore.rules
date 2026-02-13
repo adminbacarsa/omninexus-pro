@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Usuario autenticado (Firebase Auth)
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // --- INVERSORES: requiere autenticación ---
+    match /inversores/{inversorId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // --- PLAZOS FIJO ---
+    match /plazos_fijo/{pfId} {
+      allow read, write: if isAuthenticated();
+      match /movimientos/{movId} {
+        allow read, write: if isAuthenticated();
+      }
+      match /fechas_pago/{fpId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // --- APORTES ---
+    match /aportes/{aporteId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // --- CAJA CHICA ---
+    match /cajas_chica/{cajaId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /movimientos_caja/{movimientoId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /rendiciones_caja/{rendicionId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // --- FLUJO DE FONDOS ---
+    match /cuentas_fondo/{cuentaId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /movimientos_fondo/{movimientoId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // --- USUARIOS DEL SISTEMA ---
+    match /system_users/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // --- AUDITORÍA ---
+    match /audit_log/{logId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
