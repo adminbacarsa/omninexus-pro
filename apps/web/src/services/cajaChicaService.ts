@@ -12,11 +12,14 @@ import {
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase';
 import { logAudit } from './auditService';
-import type { CajaChica, MovimientoCaja, Rendicion, FilaMatrizControl } from '@/types/cajaChica';
+import { createMovimientoFondo } from './flujoFondosService';
+import { getCuentaFondo } from './flujoFondosService';
+import type { CajaChica, MovimientoCaja, Rendicion, FilaMatrizControl, CierreCaja } from '@/types/cajaChica';
 
 const COL_CAJAS = 'cajas_chica';
 const COL_MOV = 'movimientos_caja';
 const COL_RENDICIONES = 'rendiciones_caja';
+const COL_CIERRES = 'cierres_caja';
 
 function sanitize<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Record<string, unknown>;
@@ -98,13 +101,18 @@ export async function deleteCajaChica(id: string, userId?: string): Promise<void
 
 // --- Movimientos ---
 
-export async function listMovimientosCaja(cajaId: string): Promise<MovimientoCaja[]> {
+export async function listMovimientosCaja(
+  cajaId: string,
+  filtros?: { desde?: string; hasta?: string }
+): Promise<MovimientoCaja[]> {
   const q = query(
     collection(getDb(), COL_MOV),
     where('cajaId', '==', cajaId)
   );
   const snap = await getDocs(q);
-  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() } as MovimientoCaja));
+  let items = snap.docs.map((d) => ({ id: d.id, ...d.data() } as MovimientoCaja));
+  if (filtros?.desde) items = items.filter((m) => m.fecha >= filtros.desde!);
+  if (filtros?.hasta) items = items.filter((m) => m.fecha <= filtros.hasta!);
   return items.sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''));
 }
 
@@ -117,10 +125,8 @@ export async function listMovimientosCajaPorPeriodo(
   const all: MovimientoCaja[] = [];
   for (const c of cajas) {
     if (!c.id) continue;
-    const movs = await listMovimientosCaja(c.id);
-    for (const m of movs) {
-      if (m.fecha >= desde && m.fecha <= hasta) all.push(m);
-    }
+    const movs = await listMovimientosCaja(c.id, { desde, hasta });
+    all.push(...movs);
   }
   return all.sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''));
 }
@@ -129,34 +135,90 @@ export async function createMovimientoCaja(
   data: Omit<MovimientoCaja, 'id' | 'rendido'>,
   userId?: string
 ): Promise<string> {
+  const caja = await getCajaChica(data.cajaId);
+
+  // Integración Flujo Fondos: ingreso en Caja Central con cuenta asociada
+  if (
+    caja &&
+    (caja.nivel ?? 'sub_caja') === 'central' &&
+    data.tipo === 'ingreso' &&
+    caja.cuentaFondoId
+  ) {
+    const cuenta = await getCuentaFondo(caja.cuentaFondoId);
+    if (!cuenta) throw new Error('Cuenta de fondo no encontrada');
+    if ((cuenta.saldoActual ?? 0) < data.monto) {
+      throw new Error(`Saldo insuficiente en la cuenta ${cuenta.nombre}. Disponible: ${(cuenta.saldoActual ?? 0).toLocaleString('es-AR')}`);
+    }
+  }
+
+  let movimientoFondoId: string | undefined;
+  if (
+    caja &&
+    (caja.nivel ?? 'sub_caja') === 'central' &&
+    data.tipo === 'ingreso' &&
+    caja.cuentaFondoId
+  ) {
+    movimientoFondoId = await createMovimientoFondo(
+      {
+        cuentaOrigenId: caja.cuentaFondoId,
+        cuentaDestinoId: null,
+        monto: data.monto,
+        moneda: data.moneda ?? 'ARS',
+        fecha: data.fecha ?? new Date().toISOString().slice(0, 10),
+        categoria: 'Fondo a caja central',
+        descripcion: data.descripcion || `Fondo a caja chica: ${caja.nombre}`,
+        cajaId: data.cajaId,
+      },
+      userId
+    );
+  }
+
   const ref = collection(getDb(), COL_MOV);
   const now = new Date().toISOString();
   const payload = sanitize({
     ...data,
     rendido: false,
+    movimientoFondoId: movimientoFondoId,
     createdAt: now,
     createdBy: userId ?? null,
   });
   const docRef = await addDoc(ref, payload);
 
-  // Actualizar saldo de la caja
-  const caja = await getCajaChica(data.cajaId);
-  if (caja) {
-    const delta = data.tipo === 'ingreso' ? data.monto : -data.monto;
-    await updateSaldoCaja(data.cajaId, (caja.saldoActual ?? 0) + delta, userId);
+  try {
+    if (caja) {
+      const delta = data.tipo === 'ingreso' ? data.monto : -data.monto;
+      await updateSaldoCaja(data.cajaId, (caja.saldoActual ?? 0) + delta, userId);
+    }
+
+    await logAudit({
+      accion: data.tipo === 'ingreso' ? 'INGRESO' : 'EGRESO',
+      modulo: 'caja_chica',
+      detalle: `${data.tipo === 'ingreso' ? 'Ingreso' : 'Egreso'} en caja ${data.cajaId}: ${(data.monto ?? 0).toLocaleString('es-AR')} - ${data.descripcion || data.categoria || 'Sin detalle'}`,
+      entidadId: docRef.id,
+      entidadTipo: 'movimiento_caja',
+      userId,
+      metadata: { cajaId: data.cajaId, monto: data.monto, tipo: data.tipo, categoria: data.categoria },
+    }).catch(() => {});
+
+    return docRef.id;
+  } catch (err) {
+    if (movimientoFondoId && caja?.cuentaFondoId) {
+      await createMovimientoFondo(
+        {
+          cuentaOrigenId: null,
+          cuentaDestinoId: caja.cuentaFondoId,
+          monto: data.monto,
+          moneda: data.moneda ?? 'ARS',
+          fecha: data.fecha ?? now.slice(0, 10),
+          categoria: 'Devolución caja chica',
+          descripcion: `Reversión por error en movimiento caja`,
+        },
+        userId
+      ).catch(() => {});
+    }
+    await deleteDoc(docRef);
+    throw err;
   }
-
-  await logAudit({
-    accion: data.tipo === 'ingreso' ? 'INGRESO' : 'EGRESO',
-    modulo: 'caja_chica',
-    detalle: `${data.tipo === 'ingreso' ? 'Ingreso' : 'Egreso'} en caja ${data.cajaId}: ${(data.monto ?? 0).toLocaleString('es-AR')} - ${data.descripcion || data.categoria || 'Sin detalle'}`,
-    entidadId: docRef.id,
-    entidadTipo: 'movimiento_caja',
-    userId,
-    metadata: { cajaId: data.cajaId, monto: data.monto, tipo: data.tipo, categoria: data.categoria },
-  }).catch(() => {});
-
-  return docRef.id;
 }
 
 export async function deleteMovimientoCaja(id: string, cajaId: string, userId?: string): Promise<void> {
@@ -164,8 +226,50 @@ export async function deleteMovimientoCaja(id: string, cajaId: string, userId?: 
   const movSnap = await getDoc(movRef);
   if (movSnap.exists()) {
     const data = movSnap.data() as MovimientoCaja;
-    const delta = data.tipo === 'ingreso' ? -data.monto : data.monto;
+
+    // Si es parte de compra USD, eliminar primero el movimiento par (sin recursion para evitar loop)
+    if (data.operacionCambioId) {
+      const par = await getMovimientoParOperacionCambio(id, data.operacionCambioId);
+      if (par) {
+        const movParRef = doc(getDb(), COL_MOV, par.id);
+        const parSnap = await getDoc(movParRef);
+        if (parSnap.exists()) {
+          const parData = parSnap.data() as MovimientoCaja;
+          const cajaPar = await getCajaChica(par.cajaId);
+          const deltaPar = parData.tipo === 'ingreso' ? -parData.monto : parData.monto;
+          if (cajaPar) await updateSaldoCaja(par.cajaId, (cajaPar.saldoActual ?? 0) + deltaPar, userId);
+          await deleteDoc(movParRef);
+          await logAudit({
+            accion: 'ELIMINAR',
+            modulo: 'caja_chica',
+            detalle: `Eliminación movimiento par compra USD ${par.id}`,
+            entidadId: par.id,
+            entidadTipo: 'movimiento_caja',
+            userId,
+          }).catch(() => {});
+        }
+      }
+    }
+
     const caja = await getCajaChica(cajaId);
+
+    if (data.movimientoFondoId && caja?.cuentaFondoId) {
+      await createMovimientoFondo(
+          {
+            cuentaOrigenId: null,
+            cuentaDestinoId: caja.cuentaFondoId,
+            monto: data.monto,
+            moneda: data.moneda ?? 'ARS',
+            fecha: data.fecha ?? new Date().toISOString().slice(0, 10),
+            categoria: 'Devolución caja chica',
+            descripcion: `Reversión movimiento caja ${id}`,
+            referencia: id,
+          },
+          userId
+        );
+    }
+
+    const delta = data.tipo === 'ingreso' ? -data.monto : data.monto;
     if (caja) {
       await updateSaldoCaja(cajaId, (caja.saldoActual ?? 0) + delta, userId);
     }
@@ -208,7 +312,21 @@ export async function transferirFondoACaja(
   if ((sub.nivel ?? 'sub_caja') !== 'sub_caja') throw new Error('El destino debe ser Sub-caja');
   if ((central.saldoActual ?? 0) < monto) throw new Error('Saldo insuficiente en Caja Central');
 
-  const moneda = central.moneda ?? 'ARS';
+  const monedaCentral = central.moneda ?? 'ARS';
+  const monedaSub = sub.moneda ?? 'ARS';
+  if (monedaCentral !== monedaSub) {
+    throw new Error(`Monedas distintas: Central ${monedaCentral} vs Sub-caja ${monedaSub}`);
+  }
+
+  const topeSub = sub.montoMaximo ?? 0;
+  const saldoActualSub = sub.saldoActual ?? 0;
+  if (topeSub > 0 && saldoActualSub + monto > topeSub) {
+    throw new Error(
+      `La sub-caja superaría su tope. Saldo actual: ${saldoActualSub.toLocaleString('es-AR')}, tope: ${topeSub.toLocaleString('es-AR')}. Máximo a transferir: ${(topeSub - saldoActualSub).toLocaleString('es-AR')}`
+    );
+  }
+
+  const moneda = monedaCentral;
   await createMovimientoCaja(
     {
       cajaId: cajaCentralId,
@@ -234,6 +352,97 @@ export async function transferirFondoACaja(
     },
     userId
   );
+}
+
+// --- Compra USD entre cajas (egreso ARS + ingreso USD automáticos, con cotización) ---
+
+export async function comprarUSDCajaChica(
+  params: {
+    cajaArsId: string;
+    cajaUsdId: string;
+    montoPesos: number;
+    cotizacion: number;  // ARS por 1 USD
+    fecha: string;
+    descripcion?: string;
+  },
+  userId?: string
+): Promise<{ idEgreso: string; idIngreso: string }> {
+  if (params.montoPesos <= 0) throw new Error('El monto en pesos debe ser mayor a 0');
+  if (params.cotizacion <= 0) throw new Error('La cotización debe ser mayor a 0');
+
+  const cajaArs = await getCajaChica(params.cajaArsId);
+  const cajaUsd = await getCajaChica(params.cajaUsdId);
+  if (!cajaArs || !cajaUsd) throw new Error('Caja no encontrada');
+  if ((cajaArs.moneda ?? 'ARS') !== 'ARS') throw new Error('La caja origen debe ser en pesos');
+  if ((cajaUsd.moneda ?? '') !== 'USD') throw new Error('La caja destino debe ser en dólares');
+
+  const saldoArs = cajaArs.saldoActual ?? 0;
+  if (saldoArs < params.montoPesos) {
+    throw new Error(
+      `Saldo insuficiente en ${cajaArs.nombre}. Disponible: ${saldoArs.toLocaleString('es-AR')} ARS`
+    );
+  }
+
+  const montoUsd = Math.round((params.montoPesos / params.cotizacion) * 100) / 100;
+  if (montoUsd <= 0) throw new Error('El monto resultante en USD es demasiado pequeño');
+
+  const operacionCambioId = `compra_usd_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const desc = params.descripcion || `Compra USD: ${params.montoPesos.toLocaleString('es-AR')} ARS → ${montoUsd.toLocaleString('es-AR')} USD (cot. ${params.cotizacion})`;
+
+  let idEgreso: string;
+  try {
+    idEgreso = await createMovimientoCaja(
+      {
+        cajaId: params.cajaArsId,
+        tipo: 'egreso',
+        monto: params.montoPesos,
+        moneda: 'ARS',
+        fecha: params.fecha,
+        categoria: 'Compra USD',
+        descripcion: desc,
+        operacionCambioId,
+        cotizacionUsada: params.cotizacion,
+      },
+      userId
+    );
+  } catch (err) {
+    throw err;
+  }
+
+  try {
+    const idIngreso = await createMovimientoCaja(
+      {
+        cajaId: params.cajaUsdId,
+        tipo: 'ingreso',
+        tipoIngreso: 'otros',
+        monto: montoUsd,
+        moneda: 'USD',
+        fecha: params.fecha,
+        categoria: 'Ingreso por compra USD',
+        descripcion: desc,
+        operacionCambioId,
+        cotizacionUsada: params.cotizacion,
+      },
+      userId
+    );
+    return { idEgreso, idIngreso };
+  } catch (err) {
+    await deleteMovimientoCaja(idEgreso, params.cajaArsId, userId);
+    throw err;
+  }
+}
+
+/** Busca el movimiento par (el otro de la operación compra USD) excluyendo el id dado */
+export async function getMovimientoParOperacionCambio(excluirMovId: string, operacionCambioId: string): Promise<{ id: string; cajaId: string } | null> {
+  const q = query(
+    collection(getDb(), COL_MOV),
+    where('operacionCambioId', '==', operacionCambioId)
+  );
+  const snap = await getDocs(q);
+  for (const d of snap.docs) {
+    if (d.id !== excluirMovId) return { id: d.id, cajaId: (d.data() as MovimientoCaja).cajaId };
+  }
+  return null;
 }
 
 // --- Rendiciones ---
@@ -340,6 +549,50 @@ export async function aprobarRendicionYCrearReposicion(
     userId,
     metadata: { totalGastado: rend.totalGastado, items: rend.items.length },
   }).catch(() => {});
+}
+
+// --- Cierres de caja ---
+
+export async function createCierreCaja(
+  data: Omit<CierreCaja, 'id' | 'createdAt'>,
+  userId?: string
+): Promise<string> {
+  const ref = collection(getDb(), COL_CIERRES);
+  const now = new Date().toISOString();
+  const payload = sanitize({
+    ...data,
+    createdAt: now,
+    createdBy: userId ?? null,
+  });
+  const docRef = await addDoc(ref, payload);
+  await logAudit({
+    accion: 'CREAR',
+    modulo: 'caja_chica',
+    detalle: `Cierre de caja: ${data.fecha} - Saldo ${(data.saldoRegistrado ?? 0).toLocaleString('es-AR')} (${data.tipo ?? 'diario'})`,
+    entidadId: docRef.id,
+    entidadTipo: 'cierre_caja',
+    userId,
+    metadata: { cajaId: data.cajaId, fecha: data.fecha, saldo: data.saldoRegistrado },
+  }).catch(() => {});
+  return docRef.id;
+}
+
+export async function listCierresCaja(cajaId: string): Promise<CierreCaja[]> {
+  try {
+    const q = query(
+      collection(getDb(), COL_CIERRES),
+      where('cajaId', '==', cajaId),
+      orderBy('fecha', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as CierreCaja));
+  } catch {
+    const snap = await getDocs(collection(getDb(), COL_CIERRES));
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as CierreCaja))
+      .filter((c) => c.cajaId === cajaId)
+      .sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''));
+  }
 }
 
 // --- Matriz de control ---

@@ -62,6 +62,14 @@
       "fields": [
         { "fieldPath": "fechaProgramada", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "cierres_caja",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cajaId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

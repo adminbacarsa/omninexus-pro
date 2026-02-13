@@ -37,6 +37,12 @@ export interface MovimientoCaja {
   comprobanteUrl?: string;
   rendido: boolean;
   rendicionId?: string;
+  /** ID del movimiento en flujo de fondos (cuando ingreso en central proviene de cuenta) */
+  movimientoFondoId?: string;
+  /** Para compra USD: vincula egreso ARS e ingreso USD */
+  operacionCambioId?: string;
+  /** Cotización usada en compra/venta USD (ARS por 1 USD) */
+  cotizacionUsada?: number;
   createdBy?: string;
   createdAt?: string;
 }
@@ -75,6 +81,18 @@ export interface FilaMatrizControl {
   gastosRendidos: number;
   saldoActual: number;
   moneda: string;
+}
+
+/** Cierre de caja: saldo registrado al final de un período (diario/mensual) */
+export interface CierreCaja {
+  id?: string;
+  cajaId: string;
+  fecha: string;        // Fecha del cierre (YYYY-MM-DD)
+  tipo?: 'diario' | 'mensual';
+  saldoRegistrado: number;
+  observaciones?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 export const CATEGORIAS_EGRESO = [

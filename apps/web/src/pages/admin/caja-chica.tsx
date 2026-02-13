@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import AdminLayout from '@/components/AdminLayout';
 import { toast } from 'sonner';
@@ -19,14 +19,17 @@ import {
   createMovimientoCaja,
   deleteMovimientoCaja,
   transferirFondoACaja,
+  comprarUSDCajaChica,
   listRendiciones,
   createRendicion,
   aprobarRendicionYCrearReposicion,
   getMatrizControl,
   listCajasCentrales,
   listSubCajas,
+  createCierreCaja,
+  listCierresCaja,
 } from '@/services/cajaChicaService';
-import type { CajaChica, MovimientoCaja, TipoMovimientoCaja, Rendicion, ItemRendicion } from '@/types/cajaChica';
+import type { CajaChica, MovimientoCaja, TipoMovimientoCaja, Rendicion, ItemRendicion, CierreCaja } from '@/types/cajaChica';
 import { CATEGORIAS_EGRESO } from '@/types/cajaChica';
 
 const ESTADOS = [
@@ -64,6 +67,93 @@ export default function CajaChicaPage() {
   const [formRendicion, setFormRendicion] = useState<{ items: ItemRendicion[]; fecha: string }>({ items: [], fecha: new Date().toISOString().slice(0, 10) });
   const [asignarMontos, setAsignarMontos] = useState<Record<string, number>>({});
   const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
+  const [filtroFecha, setFiltroFecha] = useState<{ desde: string; hasta: string }>(() => {
+    const hoy = new Date();
+    const ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    return {
+      desde: ini.toISOString().slice(0, 10),
+      hasta: hoy.toISOString().slice(0, 10),
+    };
+  });
+  const [modalCierre, setModalCierre] = useState(false);
+  const [formCierre, setFormCierre] = useState<{ fecha: string; tipo: 'diario' | 'mensual'; observaciones: string }>({
+    fecha: new Date().toISOString().slice(0, 10),
+    tipo: 'diario',
+    observaciones: '',
+  });
+  const [cierres, setCierres] = useState<CierreCaja[]>([]);
+  const [modalCompraUSD, setModalCompraUSD] = useState(false);
+  const [formCompraUSD, setFormCompraUSD] = useState({
+    cajaArsId: '',
+    cajaUsdId: '',
+    montoPesos: 0,
+    cotizacion: 0,
+    fecha: new Date().toISOString().slice(0, 10),
+    descripcion: '',
+  });
+  const [anchosColumnas, setAnchosColumnas] = useState<Record<string, number>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const s = localStorage.getItem('caja-chica-columnas');
+        if (s) return JSON.parse(s);
+      } catch {}
+    }
+    return { fecha: 95, descripcion: 180, ingresos: 95, egresos: 95, cierre: 95 };
+  });
+  const [colResizing, setColResizing] = useState<string | null>(null);
+  const resizeStartX = useRef(0);
+  const resizeStartW = useRef(0);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('caja-chica-columnas', JSON.stringify(anchosColumnas));
+    } catch {}
+  }, [anchosColumnas]);
+
+  const handleResizeStart = useCallback((col: string, clientX: number) => {
+    const defaults: Record<string, number> = { fecha: 95, descripcion: 180, ingresos: 95, egresos: 95, cierre: 95 };
+    const w = anchosColumnas[col] ?? defaults[col] ?? 95;
+    setColResizing(col);
+    resizeStartX.current = clientX;
+    resizeStartW.current = w;
+  }, [anchosColumnas]);
+
+  useEffect(() => {
+    if (!colResizing) return;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (e: MouseEvent) => {
+      const dx = e.clientX - resizeStartX.current;
+      const newW = Math.max(50, resizeStartW.current + dx);
+      setAnchosColumnas((prev) => ({ ...prev, [colResizing]: newW }));
+    };
+    const onUp = () => {
+      setColResizing(null);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [colResizing]);
+
+  const ThResizable = useCallback(({ col, children, className = '' }: { col: string; children: React.ReactNode; className?: string }) => (
+    <th className={`relative ${className}`}>
+      <span>{children}</span>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-300 active:bg-blue-400 transition-colors -mr-1"
+        style={{ backgroundColor: colResizing === col ? 'rgb(147 197 253)' : undefined }}
+        onMouseDown={(e) => { e.preventDefault(); handleResizeStart(col, e.clientX); }}
+      />
+    </th>
+  ), [colResizing, handleResizeStart]);
 
   const permitidas = getCajasChicaPermitidas();
   const cajasFiltradas = permitidas === null ? cajas : cajas.filter((c) => c.id && permitidas.includes(c.id));
@@ -71,6 +161,9 @@ export default function CajaChicaPage() {
   const subCajas = cajaSeleccionada && (cajaSeleccionada.nivel ?? 'sub_caja') === 'central'
     ? listSubCajas(cajasFiltradas, cajaSeleccionada.id!)
     : [];
+  const cajasArs = cajasFiltradas.filter((c) => (c.moneda ?? 'ARS') === 'ARS');
+  const cajasUsd = cajasFiltradas.filter((c) => (c.moneda ?? '') === 'USD');
+  const puedeComprarUSD = cajasArs.length > 0 && cajasUsd.length > 0 && hasPermiso('caja_chica', 'crear');
   const cajasOrdenadas = [...cajasFiltradas].sort((a, b) => {
     const na = a.nivel ?? 'sub_caja';
     const nb = b.nivel ?? 'sub_caja';
@@ -96,7 +189,8 @@ export default function CajaChicaPage() {
 
   const loadMovimientos = async (cajaId: string) => {
     try {
-      const data = await listMovimientosCaja(cajaId);
+      const filtros = filtroFecha.desde && filtroFecha.hasta ? { desde: filtroFecha.desde, hasta: filtroFecha.hasta } : undefined;
+      const data = await listMovimientosCaja(cajaId, filtros);
       setMovimientos(data);
     } catch {
       setMovimientos([]);
@@ -113,7 +207,7 @@ export default function CajaChicaPage() {
 
   useEffect(() => {
     if (cajaSeleccionada?.id) loadMovimientos(cajaSeleccionada.id);
-  }, [cajaSeleccionada?.id]);
+  }, [cajaSeleccionada?.id, filtroFecha.desde, filtroFecha.hasta]);
 
   useEffect(() => {
     const permit = getCajasChicaPermitidas();
@@ -135,8 +229,10 @@ export default function CajaChicaPage() {
   useEffect(() => {
     if (cajaSeleccionada?.id) {
       listRendiciones(cajaSeleccionada.id).then(setRendiciones).catch(() => setRendiciones([]));
+      listCierresCaja(cajaSeleccionada.id).then(setCierres).catch(() => setCierres([]));
     } else {
       setRendiciones([]);
+      setCierres([]);
     }
   }, [cajaSeleccionada?.id, cajas]);
 
@@ -311,7 +407,10 @@ export default function CajaChicaPage() {
   const handleDeleteMov = async (mov: MovimientoCaja) => {
     if (!cajaSeleccionada?.id || !mov.id) return;
     if (!hasPermiso('caja_chica', 'eliminar')) return;
-    if (!confirm('¿Eliminar este movimiento?')) return;
+    const msg = mov.operacionCambioId
+      ? 'Este movimiento es parte de una compra USD. Se eliminarán ambos movimientos (egreso ARS e ingreso USD). ¿Continuar?'
+      : '¿Eliminar este movimiento?';
+    if (!confirm(msg)) return;
     try {
       await deleteMovimientoCaja(mov.id, cajaSeleccionada.id, user?.uid);
       loadCajas();
@@ -369,6 +468,38 @@ export default function CajaChicaPage() {
       toast.success('Fondo transferido');
       setModalTransferir(false);
       setFormTransferir({ subCajaId: '', monto: 0, fecha: new Date().toISOString().slice(0, 10) });
+      loadCajas();
+      if (cajaSeleccionada?.id) loadMovimientos(cajaSeleccionada.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCompraUSD = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formCompraUSD.cajaArsId || !formCompraUSD.cajaUsdId || formCompraUSD.montoPesos <= 0 || formCompraUSD.cotizacion <= 0) {
+      toast.error('Completá caja origen, caja destino, monto en pesos y cotización');
+      return;
+    }
+    setSaving(true);
+    try {
+      await comprarUSDCajaChica(
+        {
+          cajaArsId: formCompraUSD.cajaArsId,
+          cajaUsdId: formCompraUSD.cajaUsdId,
+          montoPesos: formCompraUSD.montoPesos,
+          cotizacion: formCompraUSD.cotizacion,
+          fecha: formCompraUSD.fecha,
+          descripcion: formCompraUSD.descripcion || undefined,
+        },
+        user?.uid
+      );
+      const montoUsd = Math.round((formCompraUSD.montoPesos / formCompraUSD.cotizacion) * 100) / 100;
+      toast.success(`Compra USD registrada: ${formCompraUSD.montoPesos.toLocaleString('es-AR')} ARS → ${montoUsd.toLocaleString('es-AR')} USD`);
+      setModalCompraUSD(false);
+      setFormCompraUSD({ cajaArsId: '', cajaUsdId: '', montoPesos: 0, cotizacion: 0, fecha: new Date().toISOString().slice(0, 10), descripcion: '' });
       loadCajas();
       if (cajaSeleccionada?.id) loadMovimientos(cajaSeleccionada.id);
     } catch (err) {
@@ -444,6 +575,29 @@ export default function CajaChicaPage() {
     const items = [...formRendicion.items];
     items[i] = { ...items[i], [campo]: valor };
     setFormRendicion({ ...formRendicion, items });
+  };
+
+  const handleCrearCierre = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cajaSeleccionada?.id || !hasPermiso('caja_chica', 'crear')) return;
+    const saldo = cajaSeleccionada.saldoActual ?? 0;
+    setSaving(true);
+    try {
+      await createCierreCaja({
+        cajaId: cajaSeleccionada.id,
+        fecha: formCierre.fecha,
+        tipo: formCierre.tipo,
+        saldoRegistrado: saldo,
+        observaciones: formCierre.observaciones.trim() || undefined,
+      }, user?.uid);
+      toast.success('Cierre registrado');
+      setModalCierre(false);
+      listCierresCaja(cajaSeleccionada.id).then(setCierres).catch(() => setCierres([]));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -590,6 +744,35 @@ export default function CajaChicaPage() {
                       </button>
                     )}
                     {hasPermiso('caja_chica', 'crear') && (
+                      <button
+                        onClick={() => {
+                          setFormCierre({ fecha: new Date().toISOString().slice(0, 10), tipo: 'diario', observaciones: '' });
+                          setModalCierre(true);
+                        }}
+                        className="px-4 py-3 min-h-[44px] bg-slate-600 text-white text-sm font-medium rounded-xl hover:bg-slate-700 touch-manipulation"
+                      >
+                        Registrar cierre
+                      </button>
+                    )}
+                    {puedeComprarUSD && (
+                      <button
+                        onClick={() => {
+                          setFormCompraUSD({
+                            cajaArsId: (cajaSeleccionada.moneda ?? '') === 'ARS' ? cajaSeleccionada.id ?? '' : cajasArs[0]?.id ?? '',
+                            cajaUsdId: (cajaSeleccionada.moneda ?? '') === 'USD' ? cajaSeleccionada.id ?? '' : cajasUsd[0]?.id ?? '',
+                            montoPesos: 0,
+                            cotizacion: 0,
+                            fecha: new Date().toISOString().slice(0, 10),
+                            descripcion: '',
+                          });
+                          setModalCompraUSD(true);
+                        }}
+                        className="px-4 py-3 min-h-[44px] bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 touch-manipulation"
+                      >
+                        Compra USD
+                      </button>
+                    )}
+                    {hasPermiso('caja_chica', 'crear') && (
                       <>
                         <button
                           onClick={() => abrirMov('ingreso', cajaSeleccionada)}
@@ -663,36 +846,137 @@ export default function CajaChicaPage() {
                   </div>
                 )}
                 <div className="p-4 border-t border-slate-300">
-                  <h3 className="font-semibold text-slate-800 mb-3">Ingresos y egresos</h3>
-                  <div className="divide-y divide-slate-300 max-h-[350px] overflow-y-auto">
-                  {movimientos.length === 0 ? (
-                    <div className="p-6 text-center text-slate-500 text-sm">Sin movimientos. Usá + Ingreso o - Egreso para registrar.</div>
-                  ) : (
-                    movimientos.map((m) => (
-                      <div key={m.id} className="p-4 flex items-center justify-between gap-4 hover:bg-slate-100/50 transition-colors">
-                        <div>
-                          <span className={`font-medium ${m.tipo === 'ingreso' ? 'text-green-700' : 'text-amber-700'}`}>
-                            {m.tipo === 'ingreso' ? '+' : '-'} {formatMonto(m.monto, m.moneda ?? 'ARS')}
-                          </span>
-                          <span className="text-slate-500 text-sm ml-2">{m.fecha}</span>
-                          {m.categoria && (
-                            <span className="ml-2 text-xs px-2 py-0.5 bg-slate-200 rounded-lg">{m.categoria}</span>
-                          )}
-                          {m.descripcion && (
-                            <p className="text-sm text-slate-600 mt-1">{m.descripcion}</p>
-                          )}
-                        </div>
-                        {hasPermiso('caja_chica', 'eliminar') && (
-                          <button
-                            onClick={() => handleDeleteMov(m)}
-                            className="py-2 px-3 min-h-[40px] text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium touch-manipulation shrink-0"
-                          >
-                            Eliminar
-                          </button>
-                        )}
-                      </div>
-                    ))
-                  )}
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <h3 className="font-semibold text-slate-800">Ingresos y egresos</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="date"
+                        value={filtroFecha.desde}
+                        onChange={(e) => setFiltroFecha((f) => ({ ...f, desde: e.target.value }))}
+                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      />
+                      <span className="text-slate-500">a</span>
+                      <input
+                        type="date"
+                        value={filtroFecha.hasta}
+                        onChange={(e) => setFiltroFecha((f) => ({ ...f, hasta: e.target.value }))}
+                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      />
+                      <button
+                        onClick={() => loadMovimientos(cajaSeleccionada!.id!)}
+                        className="px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg"
+                      >
+                        Filtrar
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+                    <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+                      <colgroup>
+                        <col style={{ width: anchosColumnas.fecha || 95 }} />
+                        <col style={{ width: anchosColumnas.descripcion || 180 }} />
+                        <col style={{ width: anchosColumnas.ingresos || 95 }} />
+                        <col style={{ width: anchosColumnas.egresos || 95 }} />
+                        <col style={{ width: anchosColumnas.cierre || 95 }} />
+                        {hasPermiso('caja_chica', 'eliminar') && <col style={{ width: 72 }} />}
+                      </colgroup>
+                      <thead className="sticky top-0 bg-white z-10">
+                        <tr className="bg-slate-100 border-b border-slate-300">
+                          <ThResizable col="fecha" className="text-left px-3 py-2 font-medium">Fecha</ThResizable>
+                          <ThResizable col="descripcion" className="text-left px-3 py-2 font-medium">Descripción</ThResizable>
+                          <ThResizable col="ingresos" className="text-right px-3 py-2 font-medium text-emerald-700">Ingresos</ThResizable>
+                          <ThResizable col="egresos" className="text-right px-3 py-2 font-medium text-amber-700">Egresos</ThResizable>
+                          <ThResizable col="cierre" className="text-right px-3 py-2 font-medium text-slate-600">Cierre</ThResizable>
+                          {hasPermiso('caja_chica', 'eliminar') && <th className="w-[72px] px-3 py-2"></th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const moneda = cajaSeleccionada?.moneda ?? 'ARS';
+                          const filas: { tipo: 'mov' | 'cierre'; fecha: string; mov?: MovimientoCaja; cierre?: CierreCaja }[] = [];
+                          movimientos.forEach((m) => filas.push({ tipo: 'mov', fecha: m.fecha ?? '', mov: m }));
+                          cierres.forEach((c) => {
+                            const enRango = !filtroFecha.desde || !filtroFecha.hasta || (c.fecha >= filtroFecha.desde && c.fecha <= filtroFecha.hasta);
+                            if (enRango) filas.push({ tipo: 'cierre', fecha: c.fecha, cierre: c });
+                          });
+                          filas.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+
+                          let totalIngresos = 0;
+                          let totalEgresos = 0;
+
+                          if (filas.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={hasPermiso('caja_chica', 'eliminar') ? 6 : 5} className="p-6 text-center text-slate-500">
+                                  Sin movimientos. Usá + Ingreso o - Egreso para registrar.
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return (
+                            <>
+                              {filas.map((f) => {
+                                if (f.tipo === 'mov' && f.mov) {
+                                  if (f.mov.tipo === 'ingreso') totalIngresos += f.mov.monto ?? 0;
+                                  else totalEgresos += f.mov.monto ?? 0;
+                                  return (
+                                    <tr key={`mov-${f.mov.id}`} className="border-t border-slate-200 hover:bg-slate-50">
+                                      <td className="px-3 py-2">{f.mov.fecha}</td>
+                                      <td className="px-3 py-2">
+                                        {f.mov.categoria && <span className="text-xs px-2 py-0.5 bg-slate-200 rounded">{f.mov.categoria}</span>}
+                                        {f.mov.descripcion && <span className="ml-1 text-slate-600">{f.mov.descripcion}</span>}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-emerald-700 font-medium">
+                                        {f.mov.tipo === 'ingreso' ? formatMonto(f.mov.monto, f.mov.moneda ?? moneda) : '—'}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-amber-700 font-medium">
+                                        {f.mov.tipo === 'egreso' ? formatMonto(f.mov.monto, f.mov.moneda ?? moneda) : '—'}
+                                      </td>
+                                      <td className="px-3 py-2 text-right">—</td>
+                                      {hasPermiso('caja_chica', 'eliminar') && (
+                                        <td className="px-3 py-2">
+                                          <button onClick={() => handleDeleteMov(f.mov!)} className="text-red-600 hover:bg-red-50 rounded px-2 py-1 text-xs font-medium">
+                                            Eliminar
+                                          </button>
+                                        </td>
+                                      )}
+                                    </tr>
+                                  );
+                                }
+                                if (f.tipo === 'cierre' && f.cierre) {
+                                  return (
+                                    <tr key={`cierre-${f.cierre.id}`} className="border-t border-slate-200 bg-slate-50">
+                                      <td className="px-3 py-2">{f.cierre.fecha}</td>
+                                      <td className="px-3 py-2">
+                                        <span className="text-xs px-2 py-0.5 bg-slate-300 rounded font-medium">
+                                          Cierre {f.cierre.tipo ?? 'diario'}
+                                        </span>
+                                        {f.cierre.observaciones && <span className="ml-1 text-slate-600 text-xs">{f.cierre.observaciones}</span>}
+                                      </td>
+                                      <td className="px-3 py-2 text-right">—</td>
+                                      <td className="px-3 py-2 text-right">—</td>
+                                      <td className="px-3 py-2 text-right font-medium text-slate-800">
+                                        {formatMonto(f.cierre.saldoRegistrado, moneda)}
+                                      </td>
+                                      {hasPermiso('caja_chica', 'eliminar') && <td className="px-3 py-2"></td>}
+                                    </tr>
+                                  );
+                                }
+                                return null;
+                              })}
+                              <tr className="border-t-2 border-slate-300 bg-slate-100 font-medium">
+                                <td className="px-3 py-3" colSpan={2}>Subtotal</td>
+                                <td className="px-3 py-3 text-right text-emerald-700">{formatMonto(totalIngresos, moneda)}</td>
+                                <td className="px-3 py-3 text-right text-amber-700">{formatMonto(totalEgresos, moneda)}</td>
+                                <td className="px-3 py-3 text-right text-slate-800">{formatMonto(totalIngresos - totalEgresos, moneda)}</td>
+                                {hasPermiso('caja_chica', 'eliminar') && <td className="px-3 py-3"></td>}
+                              </tr>
+                            </>
+                          );
+                        })()}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </>
@@ -1021,6 +1305,162 @@ export default function CajaChicaPage() {
                   Transferir
                 </button>
                 <button type="button" onClick={() => setModalTransferir(false)} disabled={saving} className="btn-secondary py-2.5 px-4">Cancelar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal compra USD */}
+      {modalCompraUSD && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => !saving && setModalCompraUSD(false)}>
+          <div className="card w-full max-w-md p-4 sm:p-6 border-slate-400" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-slate-800 mb-2">Compra de USD</h2>
+            <p className="text-sm text-slate-600 mb-4">
+              Se registrará egreso en caja ARS e ingreso en caja USD automáticamente, usando la cotización indicada.
+            </p>
+            <form onSubmit={handleCompraUSD} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Caja origen (ARS)</label>
+                <select
+                  value={formCompraUSD.cajaArsId}
+                  onChange={(e) => setFormCompraUSD({ ...formCompraUSD, cajaArsId: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                  required
+                >
+                  <option value="">Seleccionar...</option>
+                  {cajasArs.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre} — Saldo: {formatMonto(c.saldoActual ?? 0, 'ARS')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Caja destino (USD)</label>
+                <select
+                  value={formCompraUSD.cajaUsdId}
+                  onChange={(e) => setFormCompraUSD({ ...formCompraUSD, cajaUsdId: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                  required
+                >
+                  <option value="">Seleccionar...</option>
+                  {cajasUsd.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre} — Saldo: {formatMonto(c.saldoActual ?? 0, 'USD')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Monto (ARS)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={formCompraUSD.montoPesos || ''}
+                    onChange={(e) => setFormCompraUSD({ ...formCompraUSD, montoPesos: Number(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                    placeholder="Ej: 100000"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Cotización (ARS/USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={formCompraUSD.cotizacion || ''}
+                    onChange={(e) => setFormCompraUSD({ ...formCompraUSD, cotizacion: Number(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                    placeholder="Ej: 1050"
+                    required
+                  />
+                </div>
+              </div>
+              {formCompraUSD.montoPesos > 0 && formCompraUSD.cotizacion > 0 && (
+                <p className="text-sm text-blue-700 bg-blue-50 px-3 py-2 rounded-lg">
+                  Recibirás: <strong>{((formCompraUSD.montoPesos / formCompraUSD.cotizacion)).toFixed(2)} USD</strong>
+                </p>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={formCompraUSD.fecha}
+                  onChange={(e) => setFormCompraUSD({ ...formCompraUSD, fecha: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Descripción (opcional)</label>
+                <input
+                  type="text"
+                  value={formCompraUSD.descripcion}
+                  onChange={(e) => setFormCompraUSD({ ...formCompraUSD, descripcion: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                  placeholder="Ej: Compra efectuada en..."
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="submit" disabled={saving} className="flex-1 py-2.5 px-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50">
+                  Registrar compra
+                </button>
+                <button type="button" onClick={() => setModalCompraUSD(false)} disabled={saving} className="btn-secondary py-2.5 px-4">Cancelar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal cierre */}
+      {modalCierre && cajaSeleccionada && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => !saving && setModalCierre(false)}>
+          <div className="card w-full max-w-md p-4 sm:p-6 border-slate-400" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-slate-800 mb-4">Registrar cierre de caja</h2>
+            <p className="text-sm text-slate-600 mb-4">
+              Saldo actual: <strong>{formatMonto(cajaSeleccionada.saldoActual ?? 0, cajaSeleccionada.moneda ?? 'ARS')}</strong>
+            </p>
+            <form onSubmit={handleCrearCierre} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={formCierre.fecha}
+                  onChange={(e) => setFormCierre({ ...formCierre, fecha: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tipo</label>
+                <select
+                  value={formCierre.tipo}
+                  onChange={(e) => setFormCierre({ ...formCierre, tipo: e.target.value as 'diario' | 'mensual' })}
+                  className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                >
+                  <option value="diario">Diario</option>
+                  <option value="mensual">Mensual</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Observaciones</label>
+                <input
+                  type="text"
+                  value={formCierre.observaciones}
+                  onChange={(e) => setFormCierre({ ...formCierre, observaciones: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-400 rounded-xl bg-slate-50"
+                  placeholder="Opcional"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="submit" disabled={saving} className="flex-1 py-2.5 px-4 bg-slate-600 text-white rounded-xl hover:bg-slate-700 disabled:opacity-50">
+                  Registrar
+                </button>
+                <button type="button" onClick={() => setModalCierre(false)} disabled={saving} className="btn-secondary py-2.5 px-4">Cancelar</button>
               </div>
             </form>
           </div>

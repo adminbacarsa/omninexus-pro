@@ -43,6 +43,7 @@ export const CATEGORIAS_INGRESO = [
   'Interés plazo fijo',
   'Ingreso por compra divisas',   // USD que entra al comprar
   'Ingreso por venta divisas',   // ARS que entra al vender USD
+  'Devolución caja chica',       // Reversión al eliminar ingreso en caja central
   'Otros ingresos',
 ];
 
@@ -58,6 +59,7 @@ export const CATEGORIAS_EGRESO_SUBCAJA = [
   'Rendición sub-caja (Logística)',
   'Rendición sub-caja (Otros)',
   'Fondo a sub-caja',
+  'Fondo a caja central',
 ];
 
 export const CATEGORIAS_EGRESO_FINANCIERO = [
@@ -89,6 +91,7 @@ export const CATEGORIA_A_EGRESO: Record<string, 'RRHH' | 'Operativo' | 'Impuesto
   'Rendición sub-caja (Logística)': 'Operativo',
   'Rendición sub-caja (Otros)': 'Operativo',
   'Fondo a sub-caja': 'Operativo',
+  'Fondo a caja central': 'Operativo',
   'Interés pagado a inversores': 'Financiero',
   'Retiro inversor': 'Financiero',
   'Pago de capital a inversores': 'Financiero',
