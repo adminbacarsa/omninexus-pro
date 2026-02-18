@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { usePermisos } from '@/context/PermisosContext';
 import { listSystemUsers, updateSystemUser, resolvePermisos } from '@/services/permisosService';
+import { resetDatos } from '@/services/resetDatosService';
 import { listCajasChica } from '@/services/cajaChicaService';
 import type { SystemUser, Rol, Modulo, PermisosMap } from '@/types/permisos';
 import type { CajaChica } from '@/types/cajaChica';
@@ -17,17 +18,20 @@ import {
   ACCIONES_POR_MODULO,
   ACCION_LABELS,
 } from '@/types/permisos';
+import { RefreshCw } from 'lucide-react';
 
 export default function UsuariosPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const { hasPermiso, canVerModulo, loading: permLoading } = usePermisos();
+  const { systemUser, hasPermiso, canVerModulo, loading: permLoading } = usePermisos();
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<SystemUser | null>(null);
   const [form, setForm] = useState<Partial<SystemUser>>({});
   const [saving, setSaving] = useState(false);
   const [cajasChica, setCajasChica] = useState<CajaChica[]>([]);
+  const [resetConfirm, setResetConfirm] = useState('');
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace('/login');
@@ -132,6 +136,27 @@ export default function UsuariosPage() {
 
   const canEdit = hasPermiso('usuarios', 'editar');
 
+  const currentUserInList = user ? users.find((u) => u.uid === user.uid) : null;
+  const puedeVerReset =
+    systemUser?.rol === 'super_admin' ||
+    systemUser?.rol === 'administrador' ||
+    currentUserInList?.rol === 'super_admin' ||
+    currentUserInList?.rol === 'administrador';
+
+  const handleResetDatos = async () => {
+    if (resetConfirm !== 'BORRAR' || !puedeVerReset) return;
+    setResetting(true);
+    try {
+      await resetDatos(user?.uid);
+      setResetConfirm('');
+      toast.success('Datos reseteados. Saldos en 0 y movimientos borrados.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al resetear');
+    } finally {
+      setResetting(false);
+    }
+  };
+
   if (authLoading || permLoading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-200">
@@ -147,6 +172,49 @@ export default function UsuariosPage() {
           Los usuarios que inician sesión por primera vez aparecen como <strong>Pendiente</strong>. Activalos,
           asigná rol y permisos para que puedan acceder. Super Admin y Administrador tienen acceso total.
         </p>
+
+        {puedeVerReset && (
+          <div className="card overflow-hidden">
+            <div className="card-header">
+              <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" />
+                Reset datos (solo Super Admin)
+              </h2>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-sm text-slate-600">
+                Pone en 0 los saldos de cajas y cuentas, y borra todos los movimientos. Solo para pruebas.
+              </p>
+              <p className="text-sm font-medium text-slate-700">Escribí BORRAR para confirmar:</p>
+              <input
+                type="text"
+                value={resetConfirm}
+                onChange={(e) => setResetConfirm(e.target.value)}
+                placeholder="BORRAR"
+                className="w-full max-w-xs px-4 py-2 border border-slate-400 rounded-xl bg-white"
+              />
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleResetDatos}
+                  disabled={resetConfirm !== 'BORRAR' || resetting}
+                  className="px-4 py-2 border-2 border-amber-500 text-amber-700 rounded-xl hover:bg-amber-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  BORRAR
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetDatos}
+                  disabled={resetConfirm !== 'BORRAR' || resetting}
+                  className="px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-4 h-4 ${resetting ? 'animate-spin' : ''}`} />
+                  Resetear montos
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-12">
