@@ -63,5 +63,22 @@ service cloud.firestore {
     match /audit_log/{logId} {
       allow read, write: if isAuthenticated();
     }
+
+    // --- LIBRO DIARIO ---
+    match /libro_diario_bancos/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /libro_diario_saldos/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /libro_diario_movimientos/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /libro_diario_plantillas/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /libro_diario_compromisos/{docId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

@@ -21,6 +21,7 @@ import {
   PanelLeft,
   UserCog,
   BookOpen,
+  BookText,
 } from 'lucide-react';
 import BackButton from './BackButton';
 import { usePermisos } from '@/context/PermisosContext';
@@ -35,6 +36,7 @@ const NAV: { href: string; label: string; icon: typeof LayoutDashboard; modulo: 
   { href: '/admin/plazo-fijo', label: 'Plazos fijo', icon: PiggyBank, modulo: 'plazo_fijo' },
   { href: '/admin/caja-chica', label: 'Caja chica', icon: Wallet, modulo: 'caja_chica' },
   { href: '/admin/flujo-fondos', label: 'Flujo de fondos', icon: TrendingUp, modulo: 'flujo_fondos' },
+  { href: '/admin/libro-diario', label: 'Libro diario', icon: BookText, modulo: 'libro_diario' },
   { href: '/admin/auditoria', label: 'Auditoría', icon: FileText, modulo: 'auditoria' },
   { href: '/admin/usuarios', label: 'Usuarios', icon: UserCog, modulo: 'usuarios' },
 ];

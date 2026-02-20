@@ -6,6 +6,7 @@ export type Modulo =
   | 'plazo_fijo'
   | 'caja_chica'
   | 'flujo_fondos'
+  | 'libro_diario'
   | 'auditoria'
   | 'usuarios';
 
@@ -20,6 +21,7 @@ export const ACCIONES_POR_MODULO: Record<Modulo, Accion[]> = {
   plazo_fijo: ['ver', 'crear', 'editar', 'eliminar', 'pagar_interes', 'capitalizar'],
   caja_chica: ['ver', 'crear', 'editar', 'eliminar', 'transferir', 'rendicion'],
   flujo_fondos: ['ver', 'crear', 'editar', 'eliminar'],
+  libro_diario: ['ver', 'crear', 'editar', 'eliminar'],
   auditoria: ['ver'],
   usuarios: ['ver', 'crear', 'editar', 'eliminar'],
 };
@@ -32,6 +34,7 @@ export const MODULO_LABELS: Record<Modulo, string> = {
   plazo_fijo: 'Plazos fijo',
   caja_chica: 'Caja chica',
   flujo_fondos: 'Flujo de fondos',
+  libro_diario: 'Libro diario',
   auditoria: 'Auditoría',
   usuarios: 'Usuarios del sistema',
 };
@@ -86,6 +89,7 @@ export const PERMISOS_POR_ROL: Record<Rol, PermisosMap> = {
     inversores: { ver: true },
     cuentas: { ver: true },
     caja_chica: { ver: true },
+    libro_diario: { ver: true },
   },
   custom: {},
 };

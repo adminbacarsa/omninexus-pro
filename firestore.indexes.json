@@ -1,74 +1,36 @@
 {
   "indexes": [
     {
-      "collectionGroup": "plazos_fijo",
+      "collectionGroup": "libro_diario_movimientos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "inversorId", "order": "ASCENDING" },
-        { "fieldPath": "fechaInicio", "order": "DESCENDING" }
+        { "fieldPath": "fecha", "order": "DESCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "aportes",
+      "collectionGroup": "libro_diario_saldos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "inversorId", "order": "ASCENDING" },
+        { "fieldPath": "bancoId", "order": "ASCENDING" },
         { "fieldPath": "fecha", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "movimientos_caja",
+      "collectionGroup": "libro_diario_movimientos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "cajaId", "order": "ASCENDING" },
+        { "fieldPath": "bancoId", "order": "ASCENDING" },
         { "fieldPath": "fecha", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "movimientos_fondo",
+      "collectionGroup": "libro_diario_compromisos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "cuentaOrigenId", "order": "ASCENDING" },
-        { "fieldPath": "fecha", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "movimientos_fondo",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "cuentaDestinoId", "order": "ASCENDING" },
-        { "fieldPath": "fecha", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "movimientos_fondo",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "inversorId", "order": "ASCENDING" },
-        { "fieldPath": "fecha", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "audit_log",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "collection", "order": "ASCENDING" },
-        { "fieldPath": "timestamp", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "fechas_pago",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "fechaProgramada", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "cierres_caja",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "cajaId", "order": "ASCENDING" },
-        { "fieldPath": "fecha", "order": "DESCENDING" }
+        { "fieldPath": "mesAnio", "order": "ASCENDING" },
+        { "fieldPath": "orden", "order": "ASCENDING" },
+        { "fieldPath": "concepto", "order": "ASCENDING" }
       ]
     }
   ],
